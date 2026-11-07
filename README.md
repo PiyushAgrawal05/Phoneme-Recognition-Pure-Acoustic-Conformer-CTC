@@ -3,23 +3,46 @@
 ## Project Overview
 This repository contains an end-to-end, Pure-Acoustic Automatic Speech Recognition (ASR) pipeline built entirely from scratch in PyTorch. The model is designed to transcribe raw audio directly into CMU ARPAbet phoneme sequences without the reliance on external Language Models (LMs). A core focus of this project is a mathematically verified **Domain Adaptation strategy** that significantly improves phonetic decoding accuracy on non-native English accents.
 
-## Technical Architecture
-* **Backbone:** 12-Layer Conformer (4 attention heads, 1024-dim Feedforward Network, depthwise convolution kernel of 31).
-* **Modeling Paradigm:** Connectionist Temporal Classification (CTC) sequence-to-sequence modeling.
-* **Vocabulary:** 41 discrete classes (39 standard CMU ARPAbet phonemes, 1 `` token, and 1 CTC `` token).
-* **Feature Extraction:** 80-dimensional Log-Mel Spectrograms operating at 16 kHz with a 10 ms frame step. FP16 energy clamping (`min=1e-5`) is utilized to prevent gradient underflow during mixed-precision training.
-* **Regularization:** SpecAugment (dynamic time and frequency masking) to mitigate overfitting on smaller, non-native datasets.
+## 
+## 🏗️ Technical Architecture & Pipeline
 
-## Datasets & Ingestion Pipeline
-The pipeline utilizes an on-the-fly Grapheme-to-Phoneme (G2P) conversion strategy using `g2p_en` to standardize phonetic targets across three distinct corpora, bypassing misaligned or missing dataset columns:
-* **LibriSpeech (`train.100`):** Native English baseline data for foundational acoustic pre-training.
-* **SpeechOcean762:** Multi-accented expansion data to introduce phonetic variance.
-* **L2 Arctic:** The designated target domain of non-native speech, dynamically partitioned into strict 80% Train, 10% Validation, and 10% Unseen Test splits.
-
-## Curriculum Learning Strategy
-The training pipeline is split into two distinct phases to ensure broad generalization before specializing in the target domain:
-* **Stage 1 (Acoustic Pre-Training):** 20,000 steps on LibriSpeech and SO762 using an AdamW optimizer and OneCycleLR scheduler to build a foundational understanding of English acoustics.
-* **Stage 2 (Target Domain Adaptation):** 5,000 steps strictly on the L2 Arctic train partition. The learning rate is reduced by 10x (to `5e-5`) to perform delicate boundary adjustments on non-native accents without catastrophic forgetting of Stage 1 knowledge.
+```text
++-----------------------------------------------------------------------------------+
+|                        1. MULTI-CORPUS DATA INGESTION                             |
+|  • LibriSpeech (train.100)  --> Native English Baseline                           |
+|  • SpeechOcean762 (train)   --> Non-Native Expansion                              |
+|  • L2-Arctic (scripted)     --> Target L2 Domain (80% Train / 10% Val / 10% Test) |
++-----------------------------------------------------------------------------------+
+                                         │
+                                         ▼
++-----------------------------------------------------------------------------------+
+|                     2. AUDIO NORMALIZATION & FRONT-END                            |
+|  • 16kHz Raw Waveform (<= 10s) -> 80-Channel Log-Mel Spectrograms                 |
+|  • FP16 Logarithmic Clamping (min=1e-5) to prevent gradient underflow             |
+|  • SpecAugment Regularization (FreqMask=27, TimeMask=40)                          |
++-----------------------------------------------------------------------------------+
+                                         │
+                                         ▼
++-----------------------------------------------------------------------------------+
+|                  3. PURE-ACOUSTIC CONFORMER SEQUENCE ENCODER                      |
+|  • Linear Projection (80 -> 256)                                                  |
+|  • 12x Conformer Blocks (4 Heads, 1024 FFN, Depthwise Conv Kernel = 31)           |
+|  • CTC Classification Head (256 -> 41 Classes)                                    |
++-----------------------------------------------------------------------------------+
+                                         │
+                                         ▼
++-----------------------------------------------------------------------------------+
+|                   4. TWO-STAGE CURRICULUM TRAINING ROUTINE                        |
+|  • Stage 1 (Pre-Training): 20,000 Steps on LibriSpeech + SO762 (lr=5e-4)          |
+|  • Stage 2 (L2 Adaptation): 5,000 Steps on L2-Arctic (lr=5e-5)                    |
++-----------------------------------------------------------------------------------+
+                                         │
+                                         ▼
++-----------------------------------------------------------------------------------+
+|                   5. PURE-ACOUSTIC CTC GREEDY DECODING                            |
+|  • Argmax selection per 20ms frame -> Collapse repeated tokens -> Strip <blank>   |
++-----------------------------------------------------------------------------------+
+```
 
 ## Results & Ablation Study
 The domain adaptation hypothesis was rigorously tested by evaluating unmasked acoustic features (bypassing SpecAugment during evaluation) on the validation and unseen test sets. 
